@@ -7,35 +7,102 @@
 
   <style>
     * { box-sizing: border-box; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
-    body { background: #f3f4f6; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .container { background: #fff; padding: 24px; max-width: 600px; width: 100%; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    body {
+      background: #f3f4f6;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .container {
+      background: #fff;
+      padding: 24px;
+      max-width: 650px;
+      width: 100%;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+    }
     h1 { margin-top: 0; font-size: 1.8rem; }
     p.sub { margin-bottom: 16px; color: #6b7280; }
     label { font-weight: 600; margin-bottom: 6px; display: block; }
-    .input-row { display: flex; gap: 8px; }
-    input[type="text"] { flex: 1; padding: 10px; border: 1px solid #d1d5db; border-radius: 8px; }
-    input:focus { border-color: #6366f1; outline: none; box-shadow: 0 0 0 2px rgba(99,102,241,0.2); }
-    button { background: #6366f1; color: #fff; border: none; border-radius: 8px; padding: 10px 16px; font-weight: 600; cursor: pointer; }
+    .input-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    input[type="text"] {
+      flex: 1 1 180px;
+      padding: 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+    }
+    input:focus {
+      border-color: #6366f1;
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+    button {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
     button:hover { background: #4f46e5; }
+    button:disabled {
+      background: #9ca3af;
+      cursor: default;
+    }
     #status { margin-top: 10px; color: #6b7280; }
     #status.error { color: #dc2626; }
     #results { margin-top: 18px; }
     #results h2 { margin-bottom: 4px; }
     .meta { font-size: 0.9rem; color: #374151; margin-bottom: 10px; }
     ul.link-list { list-style: none; padding: 0; display: grid; gap: 8px; }
-    ul.link-list li a { display: block; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px; text-decoration: none; color: #111827; background: #f9fafb; }
-    ul.link-list li a:hover { background: #eef2ff; border-color: #6366f1; }
+    ul.link-list li a {
+      display: block;
+      padding: 10px 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      text-decoration: none;
+      color: #111827;
+      background: #f9fafb;
+    }
+    ul.link-list li a:hover {
+      background: #eef2ff;
+      border-color: #6366f1;
+    }
+    .actions-row {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-start;
+    }
+    .hint {
+      font-size: 0.8rem;
+      color: #9ca3af;
+      margin-top: 4px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>ISBN Availability Finder</h1>
-    <p class="sub">Enter an ISBN and see where it’s listed — plus which regions it’s available in via Google Books.</p>
+    <p class="sub">
+      Enter an ISBN and see where it is listed online, which regions list it in Google Books, and export the results.
+    </p>
 
     <label for="isbnInput">ISBN (10 or 13 digits)</label>
     <div class="input-row">
       <input id="isbnInput" type="text" placeholder="Example: 9783161484100">
       <button id="searchBtn">Search</button>
+      <button id="downloadBtn" disabled>Download results (CSV)</button>
+    </div>
+    <div class="hint">
+      CSV files open in Excel, Google Sheets, Numbers and similar tools.
     </div>
 
     <div id="status"></div>
@@ -45,14 +112,24 @@
   <script>
     const isbnInput = document.getElementById("isbnInput");
     const searchBtn = document.getElementById("searchBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
     const statusEl = document.getElementById("status");
     const resultsEl = document.getElementById("results");
 
     const REGION_CODES = {
-      US: "United States", GB: "United Kingdom", CA: "Canada",
-      AU: "Australia", IN: "India"
+      US: "United States",
+      GB: "United Kingdom",
+      CA: "Canada",
+      AU: "Australia",
+      IN: "India"
     };
     const REGIONS_TO_CHECK = Object.keys(REGION_CODES);
+
+    // Click counts for this browser session, keyed by link URL
+    const clickCounts = {};
+
+    // Data from the last successful search, used for CSV export
+    let lastExportData = null;
 
     function cleanIsbn(raw) {
       return raw.replace(/[^0-9Xx]/g, "").toUpperCase();
@@ -73,7 +150,11 @@
       const results = [];
       await Promise.all(
         REGIONS_TO_CHECK.map(async code => {
-          const url = "https://www.googleapis.com/books/v1/volumes?q=isbn:" + isbn + "&country=" + code;
+          const url =
+            "https://www.googleapis.com/books/v1/volumes?q=isbn:" +
+            isbn +
+            "&country=" +
+            code;
           try {
             const res = await fetch(url);
             if (!res.ok) return;
@@ -88,7 +169,9 @@
             else if (saleability === "NO_LONGER_FOR_SALE") status = "No longer for sale";
             else status = "Exists, sale info unknown";
             results.push({ code, name: REGION_CODES[code] || code, status });
-          } catch {}
+          } catch {
+            // ignore failures for a specific region
+          }
         })
       );
       return results;
@@ -97,48 +180,71 @@
     function buildLinks(isbn, googleData, hasOpenLibrary) {
       const links = [];
       const normalizedIsbn = isbn.toUpperCase();
+
       if (googleData?.items?.length > 0) {
         const vol = googleData.items[0];
-        if (vol.volumeInfo?.infoLink)
+        if (vol.volumeInfo?.infoLink) {
           links.push({ name: "Google Books", url: vol.volumeInfo.infoLink });
-        if (vol.saleInfo?.buyLink)
+        }
+        if (vol.saleInfo?.buyLink) {
           links.push({ name: "Google Play Books", url: vol.saleInfo.buyLink });
+        }
       }
-      if (hasOpenLibrary)
-        links.push({ name: "Open Library", url: "https://openlibrary.org/isbn/" + normalizedIsbn });
+
+      if (hasOpenLibrary) {
+        links.push({
+          name: "Open Library",
+          url: "https://openlibrary.org/isbn/" + normalizedIsbn
+        });
+      }
 
       const vendorLinks = [
-  { name: "Amazon (US)", url: "https://www.amazon.com/s?k=" + normalizedIsbn },
-  { name: "Amazon (UK)", url: "https://www.amazon.co.uk/s?k=" + normalizedIsbn },
-  { name: "Amazon (DE)", url: "https://www.amazon.de/s?k=" + normalizedIsbn },
-  { name: "Amazon (CA)", url: "https://www.amazon.ca/s?k=" + normalizedIsbn },
-  { name: "Amazon (AU)", url: "https://www.amazon.com.au/s?k=" + normalizedIsbn },
-  { name: "Barnes & Noble", url: "https://www.barnesandnoble.com/s/" + normalizedIsbn },
-  { name: "Bookshop.org", url: "https://bookshop.org/search?keywords=" + normalizedIsbn },
-  { name: "BookBaby", url: "https://www.google.com/search?q=site:store.bookbaby.com+" + normalizedIsbn },
-  { name: "Everand (Scribd)", url: "https://www.everand.com/search?query=" + normalizedIsbn },
-  { name: "WorldCat Library", url: "https://www.worldcat.org/search?q=" + normalizedIsbn },
-  { name: "Goodreads", url: "https://www.goodreads.com/search?q=" + normalizedIsbn },
-  { name: "Google search", url: "https://www.google.com/search?q=" + normalizedIsbn + "+book" }
-];
+        { name: "Amazon (US)", url: "https://www.amazon.com/s?k=" + normalizedIsbn },
+        { name: "Amazon (UK)", url: "https://www.amazon.co.uk/s?k=" + normalizedIsbn },
+        { name: "Amazon (DE)", url: "https://www.amazon.de/s?k=" + normalizedIsbn },
+        { name: "Amazon (CA)", url: "https://www.amazon.ca/s?k=" + normalizedIsbn },
+        { name: "Amazon (AU)", url: "https://www.amazon.com.au/s?k=" + normalizedIsbn },
+        { name: "Barnes & Noble", url: "https://www.barnesandnoble.com/s/" + normalizedIsbn },
+        { name: "Bookshop.org", url: "https://bookshop.org/search?keywords=" + normalizedIsbn },
+        {
+          name: "BookBaby",
+          url: "https://www.google.com/search?q=site:store.bookbaby.com+" + normalizedIsbn
+        },
+        { name: "Everand (Scribd)", url: "https://www.everand.com/search?query=" + normalizedIsbn },
+        { name: "WorldCat Library", url: "https://www.worldcat.org/search?q=" + normalizedIsbn },
+        { name: "Goodreads", url: "https://www.goodreads.com/search?q=" + normalizedIsbn },
+        { name: "Google search", url: "https://www.google.com/search?q=" + normalizedIsbn + "+book" }
+      ];
+
       links.push(...vendorLinks);
+
+      // de duplicate by URL
       const seen = new Set();
-      return links.filter(l => !seen.has(l.url) && seen.add(l.url));
+      return links.filter(link => {
+        if (seen.has(link.url)) return false;
+        seen.add(link.url);
+        return true;
+      });
     }
 
     function renderResults(isbn, googleData, links, regionAvailability) {
       resultsEl.innerHTML = "";
       statusEl.classList.remove("error");
+
       const hasItem = googleData?.items?.length > 0;
       const info = hasItem ? googleData.items[0].volumeInfo : null;
+      const title = info?.title || "";
+      const authors = info?.authors || [];
+
       if (info) {
         const titleEl = document.createElement("h2");
-        titleEl.textContent = info.title || "Book details";
+        titleEl.textContent = title || "Book details";
         resultsEl.appendChild(titleEl);
+
         const metaEl = document.createElement("div");
         metaEl.className = "meta";
         const bits = [];
-        if (info.authors?.length) bits.push("By " + info.authors.join(", "));
+        if (authors.length) bits.push("By " + authors.join(", "));
         bits.push("ISBN: " + isbn);
         metaEl.textContent = bits.join(" • ");
         resultsEl.appendChild(metaEl);
@@ -148,50 +254,171 @@
         resultsEl.appendChild(titleEl);
       }
 
+      let regionSummary = "";
       if (regionAvailability?.length) {
         const regionsDiv = document.createElement("div");
         regionsDiv.className = "meta";
-        const textParts = regionAvailability.map(r => r.name + " (" + r.status + ")");
-        regionsDiv.textContent = "Google Books availability by region: " + textParts.join(" • ");
+        const textParts = regionAvailability.map(
+          r => r.name + " (" + r.status + ")"
+        );
+        regionSummary = textParts.join(" | ");
+        regionsDiv.textContent =
+          "Google Books availability by region: " + textParts.join(" • ");
         resultsEl.appendChild(regionsDiv);
+      }
+
+      if (!links.length) {
+        const msg = document.createElement("div");
+        msg.className = "meta";
+        msg.textContent = "No link sources found for this ISBN.";
+        resultsEl.appendChild(msg);
+        return;
       }
 
       const listEl = document.createElement("ul");
       listEl.className = "link-list";
+
       links.forEach(link => {
         const li = document.createElement("li");
         const a = document.createElement("a");
+
+        const key = link.url;
+        if (!(key in clickCounts)) {
+          clickCounts[key] = 0;
+        }
+
+        function updateLabel() {
+          const count = clickCounts[key];
+          a.textContent =
+            link.name + (count > 0 ? " (" + count + " clicks)" : "");
+        }
+
+        updateLabel();
         a.href = link.url;
         a.target = "_blank";
-        a.textContent = link.name;
+        a.rel = "noopener noreferrer";
+
+        a.addEventListener("click", () => {
+          clickCounts[key] = (clickCounts[key] || 0) + 1;
+          updateLabel();
+        });
+
         li.appendChild(a);
         listEl.appendChild(li);
       });
+
       resultsEl.appendChild(listEl);
+
+      // store minimal data for export
+      lastExportData = {
+        isbn,
+        title,
+        authors,
+        regionSummary,
+        links
+      };
+      downloadBtn.disabled = false;
+    }
+
+    function toCsv(rows) {
+      return rows
+        .map(row =>
+          row
+            .map(field => {
+              const value = String(field ?? "");
+              // escape quotes
+              return '"' + value.replace(/"/g, '""') + '"';
+            })
+            .join(",")
+        )
+        .join("\r\n");
+    }
+
+    function downloadCsv() {
+      if (!lastExportData) {
+        return;
+      }
+
+      const { isbn, title, authors, regionSummary, links } = lastExportData;
+
+      const header = [
+        "ISBN",
+        "Title",
+        "Authors",
+        "Region availability (Google Books)",
+        "Link name",
+        "URL",
+        "Clicks (this browser session)"
+      ];
+
+      const rows = [header];
+
+      links.forEach(link => {
+        const clicks = clickCounts[link.url] || 0;
+        rows.push([
+          isbn,
+          title,
+          authors.join("; "),
+          regionSummary,
+          link.name,
+          link.url,
+          clicks
+        ]);
+      });
+
+      const csvContent = toCsv(rows);
+      const blob = new Blob([csvContent], {
+        type: "text/csv;charset=utf-8;"
+      });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "isbn-" + isbn + "-links.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
 
     async function searchIsbn() {
       const isbn = cleanIsbn(isbnInput.value);
       resultsEl.innerHTML = "";
-      if (!isbn) { statusEl.textContent = "Please enter an ISBN."; statusEl.classList.add("error"); return; }
+      lastExportData = null;
+      downloadBtn.disabled = true;
+
+      if (!isbn) {
+        statusEl.textContent = "Please enter an ISBN.";
+        statusEl.classList.add("error");
+        return;
+      }
+
+      statusEl.classList.remove("error");
       statusEl.textContent = "Searching...";
+
       try {
-        const [googleData, hasOpenLibrary, regionAvailability] = await Promise.all([
-          fetchGoogleBooks(isbn),
-          checkOpenLibrary(isbn),
-          getGoogleRegionAvailability(isbn)
-        ]);
+        const [googleData, hasOpenLibrary, regionAvailability] =
+          await Promise.all([
+            fetchGoogleBooks(isbn),
+            checkOpenLibrary(isbn),
+            getGoogleRegionAvailability(isbn)
+          ]);
+
         const links = buildLinks(isbn, googleData, hasOpenLibrary);
         renderResults(isbn, googleData, links, regionAvailability);
-        statusEl.textContent = "Results found:";
-      } catch {
-        statusEl.textContent = "Something went wrong.";
+        statusEl.textContent = "Results found. Click any link to open it or download as CSV.";
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Something went wrong during the search.";
         statusEl.classList.add("error");
       }
     }
 
     searchBtn.addEventListener("click", searchIsbn);
-    isbnInput.addEventListener("keyup", e => { if (e.key === "Enter") searchIsbn(); });
+    isbnInput.addEventListener("keyup", e => {
+      if (e.key === "Enter") searchIsbn();
+    });
+    downloadBtn.addEventListener("click", downloadCsv);
   </script>
 </body>
 </html>
